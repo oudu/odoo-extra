@@ -158,8 +158,13 @@ def fqdn():
 def local_pgadmin_cursor():
     cnx = None
     try:
-        cnx = psycopg2.connect("dbname=postgres")
-        cnx.autocommit = True # required for admin commands
+        cnx = psycopg2.connect(database='postgres',
+                               user=config.get('db_user'),
+                               password=config.get('db_password'),
+                               host=config.get('db_host'),
+                               port=config.get('db_port')
+                               )
+        cnx.autocommit = True  # required for admin commands
         yield cnx.cursor()
     finally:
         if cnx: cnx.close()
@@ -170,7 +175,8 @@ def local_pgadmin_cursor():
 
 class runbot_repo(osv.osv):
     _name = "runbot.repo"
-    _order = 'id'
+    _order = 'sequence'
+    _rec_name = 'rec_name'
 
     def _get_path(self, cr, uid, ids, field_name, arg, context=None):
         root = self.root(cr, uid)
@@ -192,7 +198,9 @@ class runbot_repo(osv.osv):
         return result
 
     _columns = {
+        'rec_name': fields.char('Name', required=True),
         'name': fields.char('Repository', required=True),
+        'sequence': fields.integer('Sequence'),
         'path': fields.function(_get_path, type='char', string='Directory', readonly=1),
         'base': fields.function(_get_base, type='char', string='Base URL', readonly=1),
         'nginx': fields.boolean('Nginx'),
@@ -202,7 +210,7 @@ class runbot_repo(osv.osv):
                                   string="Mode", required=True, help="hook: Wait for webhook on /runbot/hook/<id> i.e. github push event"),
         'hook_time': fields.datetime('Last hook time'),
         'duplicate_id': fields.many2one('runbot.repo', 'Duplicate repo', help='Repository for finding duplicate builds'),
-        'modules': fields.char("Modules to install", help="Comma-separated list of modules to install and test."),
+        'modules': fields.text("Modules to install", help="Comma-separated list of modules to install and test."),
         'modules_auto': fields.selection([('none', 'None (only explicit modules list)'),
                                           ('repo', 'Repository modules (excluding dependencies)'),
                                           ('all', 'All modules (including dependencies)')],
@@ -214,11 +222,13 @@ class runbot_repo(osv.osv):
             help="Community addon repos which need to be present to run tests."),
         'token': fields.char("Github token"),
         'group_ids': fields.many2many('res.groups', string='Limited to groups'),
+        'addons_path': fields.text('Addons Paths'),
     }
     _defaults = {
         'mode': 'poll',
         'modules_auto': 'repo',
         'job_timeout': 30,
+        'sequence': 10,
     }
 
     def domain(self, cr, uid, context=None):
@@ -595,9 +605,9 @@ class runbot_build(osv.osv):
 
         # detect duplicate
         domain = [
-            ('repo_id','=',build.repo_id.duplicate_id.id), 
-            ('name', '=', build.name), 
-            ('duplicate_id', '=', False), 
+            ('repo_id','=',build.repo_id.duplicate_id.id),
+            ('name', '=', build.name),
+            ('duplicate_id', '=', False),
             '|', ('result', '=', False), ('result', '!=', 'skipped')
         ]
         duplicate_ids = self.search(cr, uid, domain, context=context)
@@ -707,7 +717,7 @@ class runbot_build(osv.osv):
         branches = sorted(branches, key=sort_by_repo)
 
         for branch in branches:
-            if name.startswith(branch['branch_name'] + '-') and branch_exists(branch):
+            if name.startswith(branch['branch_name'] + '.') and branch_exists(branch):
                 return result_for(branch)
 
         # 4. Common ancestors (git merge-base)
@@ -761,6 +771,21 @@ class runbot_build(osv.osv):
                                        and m not in blacklist_modules))
         )
         return uniq_list(filter(mod_filter, modules))
+
+    def get_addons(self, cr, uid, ids, context=None):
+        get_addons = []
+        for build in self.browse(cr, uid, ids, context=None):
+            root_path = build.path()
+            additional_path_list = build.repo_id.addons_path.split(',')
+            if additional_path_list:
+                for path in additional_path_list:
+                    full_path = '%s%s' % (root_path, path if path.startswith('/') else '/' + path)
+                    if os.path.exists(full_path):
+                        get_addons.append(full_path)
+                get_addons.append('%s/%s' % (root_path, 'openerp/addons'))
+
+        return ','.join(get_addons)
+
 
     def checkout(self, cr, uid, ids, context=None):
         for build in self.browse(cr, uid, ids, context=context):
@@ -867,7 +892,17 @@ class runbot_build(osv.osv):
                 sys.executable,
                 server_path,
                 "--xmlrpc-port=%d" % build.port,
+	    	    "--load-language=%s" % 'zh_CN',
             ]
+            addons = build.get_addons()
+            if build.get_addons:
+                cmd.append("--addons-path=%s" % addons)
+
+            # db user info
+            cmd.append('--db_host=%s' % config.get('db_host'))
+            cmd.append('--db_port=%s' % config.get('db_port'))
+            cmd.append('--db_user=%s' % config.get('db_user'))
+            cmd.append('--db_password=%s' % config.get('db_password'))
             # options
             if grep(build.server("tools/config.py"), "no-xmlrpcs"):
                 cmd.append("--no-xmlrpcs")
@@ -1225,7 +1260,7 @@ class RunbotController(http.Controller):
         repo_ids = repo_obj.search(cr, uid, [])
         repos = repo_obj.browse(cr, uid, repo_ids)
         if not repo and repos:
-            repo = repos[0] 
+            repo = repos[0]
 
         context = {
             'repos': repos,
