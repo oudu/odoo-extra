@@ -170,7 +170,7 @@ def local_pgadmin_cursor():
 
 class runbot_repo(osv.osv):
     _name = "runbot.repo"
-    _order = 'id'
+    _order = 'sequence'
 
     def _get_path(self, cr, uid, ids, field_name, arg, context=None):
         root = self.root(cr, uid)
@@ -193,6 +193,7 @@ class runbot_repo(osv.osv):
 
     _columns = {
         'name': fields.char('Repository', required=True),
+        'sequence': fields.integer('Sequence'),
         'path': fields.function(_get_path, type='char', string='Directory', readonly=1),
         'base': fields.function(_get_base, type='char', string='Base URL', readonly=1),
         'nginx': fields.boolean('Nginx'),
@@ -219,6 +220,7 @@ class runbot_repo(osv.osv):
         'mode': 'poll',
         'modules_auto': 'repo',
         'job_timeout': 30,
+        'sequence': 10,
     }
 
     def domain(self, cr, uid, context=None):
@@ -595,9 +597,9 @@ class runbot_build(osv.osv):
 
         # detect duplicate
         domain = [
-            ('repo_id','=',build.repo_id.duplicate_id.id), 
-            ('name', '=', build.name), 
-            ('duplicate_id', '=', False), 
+            ('repo_id','=',build.repo_id.duplicate_id.id),
+            ('name', '=', build.name),
+            ('duplicate_id', '=', False),
             '|', ('result', '=', False), ('result', '!=', 'skipped')
         ]
         duplicate_ids = self.search(cr, uid, domain, context=context)
@@ -1225,7 +1227,7 @@ class RunbotController(http.Controller):
         repo_ids = repo_obj.search(cr, uid, [])
         repos = repo_obj.browse(cr, uid, repo_ids)
         if not repo and repos:
-            repo = repos[0] 
+            repo = repos[0]
 
         context = {
             'repos': repos,
