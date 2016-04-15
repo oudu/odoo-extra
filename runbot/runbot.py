@@ -772,7 +772,7 @@ class runbot_build(osv.osv):
         )
         return uniq_list(filter(mod_filter, modules))
 
-    def get_addons(self, cr, uid, ids, context=None):
+    def get_addons_path(self, cr, uid, ids, context=None):
         get_addons = []
         for build in self.browse(cr, uid, ids, context=None):
             root_path = build.path()
@@ -784,7 +784,7 @@ class runbot_build(osv.osv):
                         get_addons.append(full_path)
                 get_addons.append('%s/%s' % (root_path, 'openerp/addons'))
 
-        return ','.join(get_addons)
+        return get_addons
 
 
     def checkout(self, cr, uid, ids, context=None):
@@ -848,10 +848,11 @@ class runbot_build(osv.osv):
                     shutil.rmtree(build.server('addons', basename))
                 shutil.move(module, build.server('addons'))
 
-            available_modules = [
-                os.path.basename(os.path.dirname(a))
-                for a in glob.glob(build.server('addons/*/__openerp__.py'))
-            ]
+            available_modules = []
+            all_addons_path = build.get_addons_path()
+            for path in all_addons_path:
+                available_modules += [os.path.basename(os.path.dirname(a)) for a in glob.glob(build.server('%s/*/__openerp__.py' % path))]
+
             if build.repo_id.modules_auto == 'all' or (build.repo_id.modules_auto != 'none' and has_server):
                 modules_to_test += available_modules
 
@@ -894,9 +895,9 @@ class runbot_build(osv.osv):
                 "--xmlrpc-port=%d" % build.port,
 	    	    "--load-language=%s" % 'zh_CN',
             ]
-            addons = build.get_addons()
-            if build.get_addons:
-                cmd.append("--addons-path=%s" % addons)
+            # addons = build.get_addons()
+            # if build.get_addons:
+            #     cmd.append("--addons-path=%s" % addons)
 
             # db user info
             cmd.append('--db_host=%s' % config.get('db_host'))
