@@ -895,9 +895,9 @@ class runbot_build(osv.osv):
                 "--xmlrpc-port=%d" % build.port,
 	    	    "--load-language=%s" % 'zh_CN',
             ]
-            # addons = build.get_addons()
-            # if build.get_addons:
-            #     cmd.append("--addons-path=%s" % addons)
+            addons = build.get_addons_path()
+            if addons:
+                cmd.append("--addons-path=%s" % ','.join(addons))
 
             # db user info
             cmd.append('--db_host=%s' % config.get('db_host'))
