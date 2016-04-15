@@ -223,6 +223,7 @@ class runbot_repo(osv.osv):
         'token': fields.char("Github token"),
         'group_ids': fields.many2many('res.groups', string='Limited to groups'),
         'addons_path': fields.text('Addons Paths'),
+        'config': fields.text('Config'),
     }
     _defaults = {
         'mode': 'poll',
@@ -895,10 +896,17 @@ class runbot_build(osv.osv):
                 "--xmlrpc-port=%d" % build.port,
 	    	    "--load-language=%s" % 'zh_CN',
             ]
+            # add addons path if defined
             addons = build.get_addons_path()
             if addons:
                 cmd.append("--addons-path=%s" % ','.join(addons))
-
+            # create config file if needed
+            if build.repo_id.config:
+                file_path = build.path() + '/odoo.conf'
+                config_file = open(file_path, 'w')
+                config_file.write(build.repo_id.config)
+                config_file.close()
+                cmd.append('--config=%s' % file_path)
             # db user info
             cmd.append('--db_host=%s' % config.get('db_host'))
             cmd.append('--db_port=%s' % config.get('db_port'))
