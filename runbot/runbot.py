@@ -214,6 +214,8 @@ class runbot_repo(osv.osv):
             help="Community addon repos which need to be present to run tests."),
         'token': fields.char("Github token"),
         'group_ids': fields.many2many('res.groups', string='Limited to groups'),
+        'addons_path': fields.text('Addons Paths'),
+        'config': fields.text('Config'),
     }
     _defaults = {
         'mode': 'poll',
@@ -595,9 +597,9 @@ class runbot_build(osv.osv):
 
         # detect duplicate
         domain = [
-            ('repo_id','=',build.repo_id.duplicate_id.id), 
-            ('name', '=', build.name), 
-            ('duplicate_id', '=', False), 
+            ('repo_id','=',build.repo_id.duplicate_id.id),
+            ('name', '=', build.name),
+            ('duplicate_id', '=', False),
             '|', ('result', '=', False), ('result', '!=', 'skipped')
         ]
         duplicate_ids = self.search(cr, uid, domain, context=context)
@@ -762,6 +764,21 @@ class runbot_build(osv.osv):
         )
         return uniq_list(filter(mod_filter, modules))
 
+    def get_addons_path(self, cr, uid, ids, context=None):
+        get_addons = []
+        for build in self.browse(cr, uid, ids, context=None):
+            root_path = build.path()
+            additional_path_list = build.repo_id.addons_path.split(',')
+            if additional_path_list:
+                for path in additional_path_list:
+                    full_path = '%s%s' % (root_path, path if path.startswith('/') else '/' + path)
+                    if os.path.exists(full_path):
+                        get_addons.append(full_path)
+                get_addons.append('%s/%s' % (root_path, 'openerp/addons'))
+
+        return get_addons
+
+
     def checkout(self, cr, uid, ids, context=None):
         for build in self.browse(cr, uid, ids, context=context):
             # starts from scratch
@@ -823,10 +840,11 @@ class runbot_build(osv.osv):
                     shutil.rmtree(build.server('addons', basename))
                 shutil.move(module, build.server('addons'))
 
-            available_modules = [
-                os.path.basename(os.path.dirname(a))
-                for a in glob.glob(build.server('addons/*/__openerp__.py'))
-            ]
+            available_modules = []
+            all_addons_path = build.get_addons_path()
+            for path in all_addons_path:
+                available_modules += [os.path.basename(os.path.dirname(a)) for a in glob.glob(build.server('%s/*/__openerp__.py' % path))]
+
             if build.repo_id.modules_auto == 'all' or (build.repo_id.modules_auto != 'none' and has_server):
                 modules_to_test += available_modules
 
@@ -868,6 +886,17 @@ class runbot_build(osv.osv):
                 server_path,
                 "--xmlrpc-port=%d" % build.port,
             ]
+            # add addons path if defined
+            addons = build.get_addons_path()
+            if addons:
+                cmd.append("--addons-path=%s" % ','.join(addons))
+            # create config file if needed
+            if build.repo_id.config:
+                file_path = build.path() + '/odoo.conf'
+                config_file = open(file_path, 'w')
+                config_file.write(build.repo_id.config)
+                config_file.close()
+                cmd.append('--config=%s' % file_path)
             # options
             if grep(build.server("tools/config.py"), "no-xmlrpcs"):
                 cmd.append("--no-xmlrpcs")
@@ -1225,7 +1254,7 @@ class RunbotController(http.Controller):
         repo_ids = repo_obj.search(cr, uid, [])
         repos = repo_obj.browse(cr, uid, repo_ids)
         if not repo and repos:
-            repo = repos[0] 
+            repo = repos[0]
 
         context = {
             'repos': repos,
