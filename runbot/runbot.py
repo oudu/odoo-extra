@@ -158,8 +158,13 @@ def fqdn():
 def local_pgadmin_cursor():
     cnx = None
     try:
-        cnx = psycopg2.connect("dbname=postgres")
-        cnx.autocommit = True # required for admin commands
+        cnx = psycopg2.connect(database='postgres',
+                               user=config.get('db_user'),
+                               password=config.get('db_password'),
+                               host=config.get('db_host'),
+                               port=config.get('db_port')
+                               )
+        cnx.autocommit = True  # required for admin commands
         yield cnx.cursor()
     finally:
         if cnx: cnx.close()
@@ -595,9 +600,9 @@ class runbot_build(osv.osv):
 
         # detect duplicate
         domain = [
-            ('repo_id','=',build.repo_id.duplicate_id.id), 
-            ('name', '=', build.name), 
-            ('duplicate_id', '=', False), 
+            ('repo_id','=',build.repo_id.duplicate_id.id),
+            ('name', '=', build.name),
+            ('duplicate_id', '=', False),
             '|', ('result', '=', False), ('result', '!=', 'skipped')
         ]
         duplicate_ids = self.search(cr, uid, domain, context=context)
@@ -868,6 +873,11 @@ class runbot_build(osv.osv):
                 server_path,
                 "--xmlrpc-port=%d" % build.port,
             ]
+            # add db connection info
+            cmd.append('--db_host=%s' % config.get('db_host'))
+            cmd.append('--db_port=%s' % config.get('db_port'))
+            cmd.append('--db_user=%s' % config.get('db_user'))
+            cmd.append('--db_password=%s' % config.get('db_password'))
             # options
             if grep(build.server("tools/config.py"), "no-xmlrpcs"):
                 cmd.append("--no-xmlrpcs")
@@ -1225,7 +1235,7 @@ class RunbotController(http.Controller):
         repo_ids = repo_obj.search(cr, uid, [])
         repos = repo_obj.browse(cr, uid, repo_ids)
         if not repo and repos:
-            repo = repos[0] 
+            repo = repos[0]
 
         context = {
             'repos': repos,
